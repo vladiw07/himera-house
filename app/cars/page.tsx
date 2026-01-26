@@ -44,10 +44,13 @@ function CarCard({ car }: { car: SheetCar }) {
     ? car.images[Math.min(active, car.images.length - 1)]
     : "";
 
-const img =
-  !raw || raw.includes("example.com")
-    ? "/cars/placeholder.png"
-    : raw;
+const isBad =
+  !raw ||
+  raw.includes("example.com") ||
+  raw.includes("drive.google.com/file/d/"); // not direct
+
+const img = isBad ? "/cars/placeholder.png" : raw;
+
   const badge = statusLabel(car.status);
 
   return (
