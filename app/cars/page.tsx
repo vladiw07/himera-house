@@ -2,12 +2,12 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useMemo, useState } from "react";
-import { cars as carsData, type Car } from "@/data/cars";
+import { useEffect, useMemo, useState } from "react";
+import type { SheetCar } from "../../lib/carsFromSheet";
 
 const MOBILE_BG = "https://himera.mobile.bg";
 
-function statusLabel(status: any) {
+function statusLabel(status?: SheetCar["status"]) {
   switch (status) {
     case "available":
       return "Налична";
@@ -22,8 +22,7 @@ function statusLabel(status: any) {
   }
 }
 
-function statusClass(status: any) {
-  // neutral palette only (matches your site)
+function statusClass(status?: SheetCar["status"]) {
   switch (status) {
     case "available":
       return "bg-emerald-50 text-emerald-900 border-emerald-200";
@@ -38,11 +37,18 @@ function statusClass(status: any) {
   }
 }
 
-function CarCard({ car }: { car: Car }) {
+function CarCard({ car }: { car: SheetCar }) {
   const [active, setActive] = useState(0);
-  const img = car.images[Math.min(active, car.images.length - 1)];
+  const raw =
+  car.images && car.images.length
+    ? car.images[Math.min(active, car.images.length - 1)]
+    : "";
 
-  const badge = statusLabel((car as any).status);
+const img =
+  !raw || raw.includes("example.com")
+    ? "/cars/placeholder.png"
+    : raw;
+  const badge = statusLabel(car.status);
 
   return (
     <article className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
@@ -55,12 +61,11 @@ function CarCard({ car }: { car: Car }) {
           sizes="(max-width: 1024px) 100vw, 33vw"
         />
 
-        {/* Prepared status badge (enable when you start using status in data) */}
         {badge && (
           <div className="absolute left-4 top-4">
             <span
               className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium ${statusClass(
-                (car as any).status
+                car.status
               )}`}
             >
               {badge}
@@ -68,8 +73,7 @@ function CarCard({ car }: { car: Car }) {
           </div>
         )}
 
-        {/* Simple image dots if multiple photos */}
-        {car.images.length > 1 && (
+        {car.images?.length > 1 && (
           <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 gap-2 rounded-full bg-black/30 px-3 py-2 backdrop-blur-sm">
             {car.images.map((_, i) => (
               <button
@@ -115,11 +119,11 @@ function CarCard({ car }: { car: Car }) {
 
         <div className="mt-6 flex items-center justify-between gap-3">
           <span className="text-sm font-medium text-gray-900">
-            {car.price ?? "По запитване"}
+            {car.price || "По запитване"}
           </span>
 
           <a
-            href={car.mobileBgUrl || MOBILE_BG}
+            href={car.mobileUrl || MOBILE_BG}
             target="_blank"
             rel="noreferrer"
             className="inline-flex items-center justify-center rounded-md bg-gray-900 px-4 py-2 text-xs font-medium text-white hover:bg-gray-800"
@@ -133,29 +137,58 @@ function CarCard({ car }: { car: Car }) {
 }
 
 export default function CarsPage() {
+  const [cars, setCars] = useState<SheetCar[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
   const [query, setQuery] = useState("");
   const [fuel, setFuel] = useState<string>("all");
   const [trans, setTrans] = useState<string>("all");
 
+  useEffect(() => {
+    let alive = true;
+
+    (async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        const res = await fetch("/api/cars", { cache: "no-store" });
+        const data = await res.json();
+
+        if (!res.ok) throw new Error(data?.error || "Failed to load cars");
+
+        if (alive) setCars(Array.isArray(data.cars) ? data.cars : []);
+      } catch (e: any) {
+        if (alive) setError(e?.message || "Error");
+      } finally {
+        if (alive) setLoading(false);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
 
-    return carsData.filter((c) => {
+    return cars.filter((c) => {
       const matchesQ =
         !q ||
         c.title.toLowerCase().includes(q) ||
-        c.subtitle.toLowerCase().includes(q);
+        (c.subtitle || "").toLowerCase().includes(q);
 
       const matchesFuel = fuel === "all" ? true : c.fuel === fuel;
       const matchesTrans = trans === "all" ? true : c.transmission === trans;
 
       return matchesQ && matchesFuel && matchesTrans;
     });
-  }, [query, fuel, trans]);
+  }, [cars, query, fuel, trans]);
 
   return (
     <main className="min-h-screen bg-white">
-      {/* Page header */}
       <section className="border-b border-gray-200 bg-white">
         <div className="mx-auto max-w-7xl px-6 py-10">
           <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
@@ -189,12 +222,11 @@ export default function CarsPage() {
             <div className="rounded-xl border border-gray-200 bg-gray-50 px-5 py-4 text-sm text-gray-700">
               <div className="text-xs text-gray-500">Резултати</div>
               <div className="mt-1 font-semibold text-gray-900">
-                {filtered.length} автомобила
+                {loading ? "Зареждане..." : `${filtered.length} автомобила`}
               </div>
             </div>
           </div>
 
-          {/* Filters */}
           <div className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <input
               value={query}
@@ -237,10 +269,17 @@ export default function CarsPage() {
         </div>
       </section>
 
-      {/* Grid */}
       <section className="bg-gray-50">
         <div className="mx-auto max-w-7xl px-6 py-10">
-          {filtered.length > 0 ? (
+          {error ? (
+            <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-sm text-red-900">
+              Грешка при зареждане на автомобилите. ({error})
+            </div>
+          ) : loading ? (
+            <div className="rounded-2xl border border-gray-200 bg-white p-8 text-sm text-gray-600">
+              Зареждане...
+            </div>
+          ) : filtered.length > 0 ? (
             <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
               {filtered.map((car) => (
                 <CarCard key={car.id} car={car} />
@@ -252,7 +291,6 @@ export default function CarsPage() {
             </div>
           )}
 
-          {/* CTA */}
           <div className="mt-10 rounded-2xl border border-gray-200 bg-white p-8 shadow-sm">
             <h2 className="text-xl font-semibold text-gray-900">
               Не намирате търсения автомобил?
